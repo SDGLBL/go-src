@@ -305,7 +305,7 @@ $ GOOS=linux GOARCH=amd64 go tool compile -S -l simple2.go >  simple2.s && rm si
 	0x000b 00011 (main.go:19)	RET
 ```
 
-​		嗯....，意外的setp方法也非常简单认真学习了第一个程序汇编代码的读者肯定可以一眼看出setp方法只是简单的把`BX`,`CX`,`DI`寄存器中存储的值分别转移到AX,AX+8,AX+16地址的栈位置上`稍后我们会在main函数中看到这四个寄存器的值是如何被初始化的和指向哪里的`。
+​		嗯....，意外的setp方法也非常简单认真学习了第一个程序汇编代码的读者肯定可以一眼看出setp方法只是简单的把`BX`,`CX`,`DI`寄存器中存储的值分别转移到AX,AX+8,AX+16地址的栈位置上稍后我们会在main函数中看到这四个寄存器的值是如何被初始化的和指向哪里的。
 
 ### 深入main方法
 
@@ -342,7 +342,7 @@ $ GOOS=linux GOARCH=amd64 go tool compile -S -l simple2.go >  simple2.s && rm si
 0x001d 00029 (simple2.go:22)	MOVUPS	X15, "".s+56(SP)
 ```
 
-​		`MOVQ  $0, "".s+48(SP)`很简单只是将SP+48栈位置赋值为0，实际上SP+48位置也是结构体simple在栈中的开始位置，也就是说SP+48到SP+72的24个字节栈空间便是simple结构体实例在栈上所占局的空间，`MOVUPS  X15, "".s+56(SP)`可能读者会有所困惑，因为X15在amd64平台的Go汇编中是一个特殊寄存器，在[Architecture specifics]([8] [Internal ABI](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md))中我们可看到amd64平台的如下几个特殊寄存器，其中X15代表零值，因此偏移值29的此行指令便是将SP+56到SP+72的栈空间全部赋为零值。
+​		`MOVQ  $0, "".s+48(SP)`很简单只是将SP+48栈位置赋值为0，实际上SP+48位置也是结构体simple在栈中的开始位置，也就是说SP+48到SP+72的24个字节栈空间便是simple结构体实例在栈上所占局的空间，`MOVUPS  X15, "".s+56(SP)`可能读者会有所困惑，因为X15在amd64平台的Go汇编中是一个特殊寄存器，在[8] [Internal ABI](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md)中我们可看到amd64平台的如下几个特殊寄存器，其中X15代表零值，因此偏移值29的此行指令便是将SP+56到SP+72的栈空间全部赋为零值。
 
 > *Rationale*: We designate X15 as a fixed zero register because  functions often have to bulk zero their stack frames, and this is more  efficient with a designated zero register. 也就是说X15寄存器就是一个专门用来存储零值并用来给栈帧批量赋零的寄存器。
 
@@ -387,7 +387,7 @@ $ GOOS=linux GOARCH=amd64 go tool compile -S -l simple2.go >  simple2.s && rm si
 
 ![second-programe-stack](../imgs/chapter-1-second-programe-stack.png)
 
-​		**不过等一下**，相比善于观察的读者一定会发现为啥编译器只用到了SP+48以上的空间但分配栈空间的时候为啥分配了80个字节，并且`set`与`setp`方法后的`$0-48`与`$0-32`加起来确实是80。实际上之所以第二个程序此文没有在一开始便说明这一点便是为了留到此时作为一点小挑战，对此感到困惑的读者可以试着在编译参数中添加`-N`然后仔细查看汇编代码，想必认真阅读了上述两个程序讲解内容的读者一定可以轻松的靠自己找到原因。
+​		**不过等一下**，相必善于观察的读者一定会发现为啥编译器只用到了SP+48以上的空间但分配栈空间的时候为啥分配了80个字节，并且`set`与`setp`方法后的`$0-48`与`$0-32`加起来确实是80。实际上之所以第二个程序此文没有在一开始便说明这一点便是为了留到此时作为一点小挑战，对此感到困惑的读者可以试着在编译参数中添加`-N`然后仔细查看汇编代码，想必认真阅读了上述两个程序讲解内容的读者一定可以轻松的靠自己找到原因。
 
 ## 第三个程序
 
@@ -425,7 +425,7 @@ func main() {
 
 ​		在开始展示这部分代码的对应汇编代码前，读者最好先自行快速阅读一下[9] [Generic Implememtation](https://go.googlesource.com/proposal/+/30e9a8d11d1e84aafcbb10775b4c7d9e223214fa/design/generics-implementation-dictionaries-go1.18.md)了解Go语言目前实现Generic的方式，这对理解接下来的汇编代码将有所帮助。对于范型我也会在后续单独开辟第六章节来详细讲解其实现。
 
-> 简单的说Go的Generic并没有像C++,Rust一样通过类型特化（单态化）来实现，也不像Java那样抹除了类型信息，而是选择了在两者间的一条道路，这种选择虽然尽可能减少对Go语言编译速度的影响，但同时却需要付出难以进行inline等编译期优化的代价。具体的取舍与分析详见第六章。
+> 简单的说Go的Generic并没有像C++,Rust一样通过类型特化（单态化）来实现，也不像Java那样抹除了类型信息，而是选择了在两者间的一条道路（Dictionaries and Gcshape Stenciling），这种选择虽然尽可能减少对Go语言编译速度的影响，但同时却需要付出难以进行inline等编译期优化的代价。具体的取舍与分析详见第六章。
 
 ​		继续执行如下代码生成汇编代码，不过当打开simple3.s就会看到生成的远比之前代码复杂的汇编代码，因此下面将会一部分一部分的讲解。
 

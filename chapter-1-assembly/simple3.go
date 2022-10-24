@@ -6,12 +6,14 @@ type simple3[T any] struct {
 	c T
 }
 
+//go:noinline
 func (s simple3[T]) set(a, b, c T) {
 	s.a = a
 	s.b = b
 	s.c = c
 }
 
+//go:noinline
 func (s *simple3[T]) setp(a, b, c T) {
 	s.a = a
 	s.b = b
