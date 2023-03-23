@@ -78,6 +78,6 @@ $$
 
 首先让 $W$ 成为一个一次写入 `slot`操作后被黑色堆对象 $B$ 指向的白色对象，在这种操作下不破坏原有的 $W$ 灰色保护状态，这有两种情况
 
-1. 情况 1：$B \ne obj$ 此时 $W$ 一直被 $B$ 指向，假设在写入 `slot` 前存在序列 $G \rightarrow W_1 \rightarrow \cdots \rightarrow W$ 将 $W$ 灰色保护起来，那么在写入后如果此序列中不包含 `obj.slot` 那么 $W$ 的灰色保护在写入后依然不会被破坏，反之包含 `obj.slot` 说明在写入前存在一条这样的序列 $G \rightarrow W_1 \rightarrow \cdots \rightarrow^{obj.slot} O_{oldptr} \rightarrow \cdots \rightarrow W$ 由于删除写屏障会将$O_{oldptr}$置为灰色对象 $O_{oldptr} \iff G_{oldptr}$，此时必定存在序列 $G_{oldptr} \rightarrow \cdots \rightarrow W$ 使得 $W$ 被灰色保护。
+1. 情况 1：$B ≠ obj$ 此时 $W$ 一直被 $B$ 指向，假设在写入 `slot` 前存在序列 $G \rightarrow W_1 \rightarrow \cdots \rightarrow W$ 将 $W$ 灰色保护起来，那么在写入后如果此序列中不包含 `obj.slot` 那么 $W$ 的灰色保护在写入后依然不会被破坏，反之包含 `obj.slot` 说明在写入前存在一条这样的序列 $G \rightarrow W_1 \rightarrow \cdots \xrightarrow{obj.slot} O_{oldptr} \rightarrow \cdots \rightarrow W$ 由于删除写屏障会将$O_{oldptr}$置为灰色对象 $O_{oldptr} \iff G_{oldptr}$，此时必定存在序列 $G_{oldptr} \rightarrow \cdots \rightarrow W$ 使得 $W$ 被灰色保护。
 
-2. 情况 2： $B \equal obj$ 此时 $W$ 在写入后才被黑色对象指向，
+2. 情况 2： $B = obj$ 此时 $W$ 在写入后才被黑色对象指向，
