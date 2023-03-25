@@ -8,12 +8,34 @@
 - 黑色对象 活跃的对象，包括不存在任何引用外部指针的对象以及从根对象可达的对象；
 - 灰色对象 活跃的对象，因为存在指向白色对象的外部指针，垃圾收集器会扫描这些对象的子对象；
 
+![tri-color-obj](../imgs/chapter-8-tri-color-obj.png)
+
 ### Tri-color invariant / 三色抽象原则
 
 - `强三色不变原则`：黑色对象不会指向白色对象，只会指向灰色对象或者黑色对象
 - `弱三色不变原则`：黑色对象指向的白色对象必须存在于一条包含灰色对象的且可到此白色对象的可达路径中
 
 - `根本原则`：无论是强还是弱三色不变原则其共同的最终目的都是为了保证内存中一定不存在白色对象无法被 GC 的路径遍历算法遍历到，需要保证这一点的前提只有一个 --- 那就是保证所有不需要被回收的白色对象的引用链路上游中至少存在一个灰色对象，所谓的强/弱原则只是满足这个前提的两种方式。
+
+## 三色扫描
+
+简单的说三色扫描方式就是不断重复如下三个步骤最终实现回收所有剩余白色对象
+
+初始步骤：扫描所有栈，全局对象并将其中指向的堆对象都染灰并放入灰色队列中
+
+1. 扫描灰色队列并将其中对象指向的其他对象置为灰色入队
+2. 将扫描扫描的灰色对象置为黑色出队
+3. 重复 1 步骤直到灰色队列为空
+
+最后清除所有白色对象
+
+我们需要做的事情就是找到一种办法在同时执行上述步骤的过程中保证赋值器不会导致对象被隐藏
+
+> 被隐藏：指不应该被回收的对象被回收的情况发生，或者说存在不应该被回收的白色对象没有任何灰色对象可以到达它
+
+一个简答的例子可以看如下图片所示
+
+![tri-color example](../imgs/chapter-8-tri-color-example.png)
 
 ## Barrier / 屏障技术
 
@@ -23,7 +45,7 @@
 
 > Hook：对屏障的一种称呼，实际上屏障就是一种 Hook 方法，Hook 的对象便是不开启屏障时的写内存操作。
 
-### Dijkstra Write Barrier / Dijkstra 插入写屏障
+### Dijkstra Write Barrier / Dijkstra 插入写屏障 + 灰色赋值器
 
 ```go
 func DijkstraWritePointer(slot *unsafe.Pointer, ptr unsafe.Pointer) {
@@ -38,7 +60,7 @@ func DijkstraWritePointer(slot *unsafe.Pointer, ptr unsafe.Pointer) {
 
 > 因为 `Stack` 上的指针指向的对象是 `GC` 开始扫描的对象，如果我们在向一个已经被 `GC` 扫描过的 `Stack` 上保存指针同时不对其染色的时候，我们无法确定被保存的指针是否指向的是一个白色对象，也就违反了在三色原则中我们提到的根本原则。
 
-### Yuasa Write Barrier / Yuasa 删除写屏障
+### Yuasa Write Barrier / Yuasa 删除写屏障 + 灰色赋值器
 
 ```go
 func YuasaWritePointer(slot *unsafe.Pointer, ptr unsafe.Pointer) {
@@ -54,7 +76,7 @@ func YuasaWritePointer(slot *unsafe.Pointer, ptr unsafe.Pointer) {
 
 1. 其需要在起始时进行 `STW` 并扫描所有栈保证由黑色对象指向的任何白色对象都受到灰色堆对象的保护
 
-> 被灰色保护指对象可以通过一个灰色堆对象被访问到 也就是${\forall}B{\rightarrow}W \enspace {\exists}G{\rightarrow}W_1{\rightarrow}...{\rightarrow}W_n{\rightarrow}W \wedge G \in Heap Obejct$
+> 被灰色保护指对象可以通过一个灰色堆对象被访问到 也就是${\forall}B{\rightarrow}W \enspace {\exists}G{\rightarrow}W_1{\rightarrow}...{\rightarrow}W_n{\rightarrow}W \wedge G \in Heap Object$
 
 > 如果我们不在开始时进行 `STW` 扫描所有栈的话是无法保证**弱三色不变原则**，比如一个栈被扫描完为黑一个栈还未被扫描此时如果将前者某个包含的黑色堆对象包含的指针指向后者中一个指向堆的白色对象，此时就会出现一个白色对象只被黑色对象指向，同时违背了`强/弱原则`。
 
@@ -68,9 +90,9 @@ func YuasaWritePointer(slot *unsafe.Pointer, ptr unsafe.Pointer) {
 
 - 两种屏障的缺陷实际上都是由栈，寄存器无法使用屏障 Hook 引起，两者都无法保证栈上新指向对象不为白色, 一个选择在扫描结束 `STW` 扫描栈重新标记，一个选择在扫描前 `STW` 提前扫描栈标记。
 
-### Hybrid Write Barrier / 混合写屏障
+### Hybrid Write Barrier / 混合写屏障 + 黑色赋值器
 
-```go
+```plain
 writePointer(slot, ptr):
     shade(*slot)
     if current stack is grey:
@@ -79,9 +101,26 @@ writePointer(slot, ptr):
 ```
 
 在上述两种方式中都存
-`Hybrid Write Barrier`意为混合写屏障，实际其包含了 `Yuasa` 和 `Dijkstra` 两种写屏障，与 `Yuasa`删除写屏障一样混合写屏障实际上并不满足**强三色不变原则**，其只在向栈上写入 `ptr` 时才满足
+`Hybrid Write Barrier`意为混合写屏障，实际其包含了 `Yuasa` 和 `Dijkstra` 两种写屏障，混合写屏障结合了两种屏障的优点, 不需要在扫描开始和结束的时候 `STW` 扫描所有堆和栈, 扫描和清除并发执行。 (不过扫描单个的栈还是需要把对应的协程暂停这也是日后优化的方向)。
+
+> 需要注意的是为了简化实现实际上 `runtime` 中的混合写屏障不会判断赋值器所在栈是否是灰色再给 `ptr` 染灰，而是直接染灰。也就是代码逻辑应该是
+
+```plain
+writePointer(slot, ptr):
+    shade(*slot)
+    shade(ptr)
+    *slot = ptr
+```
+
+当然世上不存在完美的解决方案，混合写屏障虽然可以解决 `STW`，但支付的代价就是实现的复杂以及保守的对象图修改方式导致的回收精度下降问题，同时也会导致编译器无法使用一些优化手段比如 nil 指针写入优化。
 
 ### 混合写屏障有效性证明
+
+参考文档 [Proof](./Proof.md)
+
+## 混合写屏障源码分析
+
+<dlv color="green">TODO:</dlv>
 
 ## 链接
 
