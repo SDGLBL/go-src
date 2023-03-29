@@ -4,6 +4,8 @@
 
 在这个章节将会介绍 Go 协程的实现机制，启动与执行方式。首先我们会通过讲解程序启动的过程来介绍特殊协程`g0`的启动过程从而理解最初的 go 协程是如何启动与初始化的，随后我们会深入到`runtime`中启动代码中用户定义的`go func() {}`函数代码来了解`g0`如何挂载在`m0`上调度并执行用户定义的协程。
 
+> 实际上每个 `m` 都拥有自己的 `g0` 只是对于 `m0` 来说它的 `g0` 负责最开始的程序启动因此显得比较特殊。
+
 ## Go 程序的启动
 
 整个启动的关节节点如下,我们主要关注初始化`初始化g0与TLS`以及`初始化用户主协程`部分，因为这两部分对于理解 Go 程序的启动最为关键，其他部分将在第三章节`scheduler`中提到。
@@ -24,26 +26,26 @@ flowchart LR
   click F "https://github.com/golang/go/blob/819087624072fe8ca5914668e837d18eb231f04e/src/runtime/asm_amd64.s#L345"
   click I "https://github.com/golang/go/blob/819087624072fe8ca5914668e837d18eb231f04e/src/runtime/asm_amd64.s#L354"
 
-  A --> B --> G_A  --> G_B  --> G_C  --> I
+  A -->|call| B -->|call| G_A  -->|call| G_B  -->|call| G_C  -->|call| I
 
   G_A_A[init_g0]
   G_A_B[runtime.settls]
   subgraph G_A [初始化g0与TLS]
-  C -.-> G_A_A  -.-> G_A_B -.-> C
+  C -.->|call| G_A_A  -.->|call| G_A_B -.->|return| C
   end
 
   G_B_A[runtime.check]
   G_B_B[runtime.args]
   G_B_C[runtime.osinit]
   subgraph G_B [检查并初始化系统参数]
-  D -.-> G_B_A -.-> G_B_B -.-> G_B_C -.-> D
+  D -.->|call| G_B_A -.->|call| G_B_B -.->|call| G_B_C -.->|return| D
   end
 
   G_C_A[runtime.schedinit]
   G_C_B[runtime.mainPC]
   G_C_C[runtime.newproc]
   subgraph G_C [初始化调度器,用户主协程以及处理器]
-  F -.-> G_C_A -.-> G_C_B -.-> G_C_C -.-> F
+  F -.->|call| G_C_A -.->|call| G_C_B -.->|call| G_C_C -.->|return| F
   end
 ```
 
@@ -141,7 +143,8 @@ type g struct {
 
 在`amd64`平台上还有一个特殊的实现其涉及到了一个在`amd64`平台的特殊寄存器`TLS`（**Thread Local Storage**），在`amd64`平台上这个寄存器用来保存当前正在执行的 goroutine 的`g`结构体实例地址。
 
-> 之所以叫 TLS 寄存器只是因为在 go 的伪汇编中将其视作为一个寄存器，实际上在 Linux 内核中以及实际物理 CPU 中是不存在这个寄存器的，其功能依赖于物理寄存器`FS`与`GS`来实现。具体细节可以查看
+> 之所以叫 TLS 寄存器只是因为在 go 的伪汇编中将其视作为一个寄存器，实际上在 Linux 内核中以及实际物理 CPU 中是不存在这个寄存器的，其功能依赖于物理寄存器`FS`与`GS`来实现。具体细节可以查看 (简单的说就是把 `TLS` 的地址存放在 `FS` 寄存器中)
+
 > [3] [TLS code](https://elixir.bootlin.com/linux/v2.6.39/source/arch/x86/include/asm/segment.h#L170)。
 
 > 对于 go 语言中的 TLS 使用&解释可以直接阅读[4] [TLS Comment](https://github.com/golang/go/blob/a6219737e3eb062282e6483a915c395affb30c69/src/cmd/internal/obj/x86/obj6.go#L72)，下面的汇编中需要运用到此 comment 中包含的知识，建议读者先阅读完再继续向下阅读。
@@ -188,7 +191,7 @@ TEXT runtime·settls(SB),NOSPLIT,$32
 
 > get_tls 只是个简单宏定义`#define	get_tls(r)	MOVL TLS, r`起作用仅仅是把 TLS 寄存器保存的 g 指针读取到指定的寄存器，g(BX)实际也是宏替换`#define	g(r)	0(r)(TLS*1)` -> `0(BX)(TLS*1)`其中`0(BX)`代表`BX`偏移为 0 的位置，后面的`(TLS*1)`只是一个标识符。具体细节请阅读[ELF Handling For Thread-Local Storage](https://akkadia.org/drepper/tls.pdf)中的 4.4.6 了解 x86-64 平台获取`TLS`的标准指令序列。
 
-### 存储 g0 到 TLS
+### 存储 [g0](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L115) 协程的初始化 到 TLS
 
 正如前面所说`TLS`保存有当前正在执行的 go 协程实例指针，而当前有且只有准备好的`g0`协程需要执行，因此下一步便是将准备好的`g0`存储到`TLS`中。也就是[下面指令](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L264-L275)中的 `LEAQ	runtime·g0(SB), CX`和`MOVQ	CX, g(BX)`，随后就是把 m0.g0 指向`runtime.g0`以及 g0.m 指向`runtime.m0`（这部分涉及第三章 scheduler 中 GMP 部分知识）。
 
@@ -230,7 +233,7 @@ flowchart LR
 
 最后的[osinit](https://github.com/golang/go/blob/55eaae452cf69df768b2aaf6045db22d6c1a4029/src/runtime/os_linux.go#L329-L351)和[schedinit](https://github.com/golang/go/blob/55eaae452cf69df768b2aaf6045db22d6c1a4029/src/runtime/proc.go#L665-L769)前者只是简单的通过`systemcall`获取一下 cpu 数量然后将其记录到[`ncpu`](https://github.com/golang/go/tree/master/src/runtime/runtime2.go#L1135)中，对于`schedinit`则复杂得多，其负责初始化运行时内容并进行各种检查关于这部分内容将会在第三章详细讲解。
 
-### 加载[runtime.main 并创建新 P](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L347-L351)
+### 加载 [runtime.main 并创建新 P](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L347-L351)
 
 首先[`$runtime·mainPC`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L375-L379)实际上指向了[`runtime.main`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L145-L279)函数。
 这部分的指令很简单只是将`$runtime·mainPC`的地址存储到`AX`寄存器中随后将`AX`中的值存储到 stack 上，并作为`runtime·newproc`的入参来使用，所以下面我们来重点关注 newproc 做了什么并如何使用 stack 上的`$runtime·mainPC`
@@ -270,7 +273,26 @@ func newproc(fn *funcval) {
 
 首先[`getg`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/stubs.go#L21-L24)获取当前正在运行的`g`也就是获取[g0](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L115)(在 `amd64` 平台这行会被汇编重写为从 `R14` 或 `TLS` 寄存器获取)， `getcallerpc` 则获取调用者的调用者的 PC 其实也就是汇编中调用 `newpoc` 时的 PC(指向 `CALL	runtime·newproc(SB)` 的下一行指令)，其值将会被稍后创建的 `newg` 所持有。随后调用 `systemstack` 方法创建 `newg` 并将其放到了当前 `g0` 绑定的 `M` 对应的 `P` 的队列上，对于其中的 `newproc1` 主要任务就是将需要执行的函数入口 `fn` 绑定到创建的 `newg` （其父协程便是`g0`）上，对如何创建 `newg` 的过程感兴趣的读者可以自行阅读[`newproc1`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L4245-L4337)。
 
-在创建完 `newg` 后变回将其放置到当前 `g` 也就是 `g0` 所绑定的 `M` 对应的 `P` 的局部可运行 g 队列上(local runnable queue)，随后运行 `wakep()` 让 `P`运行刚刚加入的 `newg`。
+在创建完 `newg` 后便会将其放置到当前 `g` 也就是 `g0` 所绑定的 `M` 对应的 `P` 的局部可运行 g 队列上(local runnable queue)。因为此时 `mainStarted` 为 `false` 所以 `wakep()` 还不会被调用。
+
+完成上述过程后机会执行启动函数 `rt0_go` 最后的步骤
+
+### 运行 [runtime.mstart](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L1405-L1454)
+
+```asm
+CALL	runtime·mstart(SB) // start this M
+CALL	runtime·abort(SB)  // mstart should never return
+```
+
+在将上一小节准备好的 `g0` 入队后，随后便会调用 `mstart` 函数来从 `local runnable queue` 中获取放入的 `g0` 来运行，此时 `runtime.main` 才算真正的运行起来。不过真正运行的链路应该如下图所示。
+
+```mermaid
+flowchart LR
+  A[mstart] -->|call| B[mstart0] -->|call| C[mstart1]
+  click A "https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L1405-L1407"
+  click B "https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L1409-L1454"
+  click C "https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L1456-L1495"
+```
 
 ###
 
@@ -289,3 +311,7 @@ func newproc(fn *funcval) {
 [6] [ELF Handling For Thread-Local Storage](https://akkadia.org/drepper/tls.pdf)
 
 [7] [VSystemCall](https://www.ukuug.org/events/linux2001/papers/html/AArcangeli-vsyscalls.html)
+
+```
+
+```
