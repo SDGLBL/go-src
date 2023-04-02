@@ -37,11 +37,11 @@ $$
 证明：
 
 1. 因为栈上对象只只能指向自己栈上对象或堆对象，又因为栈的颜色是原子改变的（要么全黑要么全灰）因此不会出现黑指向白，所以 $O_1$ 一定是堆对象。
-2. 又因为 $T2$ 所以$O_2$到$O_n$一定都为堆对象。
-3. 如果$O_i$不存在那么引理 3 退回到$T1$。
-4. 如果$O_i$中存在黑色对象那么回到证明开始并以此黑色对象为起点开始证明$T3$
-5. 如果$O_i$中存在灰色对象那么$W$一定被灰色保护。
-6. 如果$O_i$都为白色对象，那么因为$O_1$被黑色对象指向，因为$T1$所以$O_1$一定被某个灰色对象以 $G \rightarrow W_1 \rightarrow \cdots \rightarrow W_n \rightarrow O_1$的方式保护，那么$W$一定以$G \rightarrow W_1 \rightarrow \cdots \rightarrow W_n \rightarrow O_1 \rightarrow \cdots \rightarrow O_n \rightarrow W$这样的方式被灰色保护。
+2. 又因为 $T2$ 所以$O_2$ 到 $O_n$ 一定都为堆对象。
+3. 如果 $O_i$ 不存在那么引理 3 退回到 $T1$。
+4. 如果 $O_i$ 中存在黑色对象那么回到证明开始并以此黑色对象为起点开始证明$T3$
+5. 如果 $O_i$ 中存在灰色对象那么 $W$ 一定被灰色保护。
+6. 如果 $O_i$ 都为白色对象，那么因为$O_1$ 被黑色对象指向，因为 $T1$ 所以 $O_1$ 一定被某个灰色对象以 $G \rightarrow W_1 \rightarrow \cdots \rightarrow W_n \rightarrow O_1$ 的方式保护，那么 $W$ 一定以 $G \rightarrow W_1 \rightarrow \cdots \rightarrow W_n \rightarrow O_1 \rightarrow \cdots \rightarrow O_n \rightarrow W$ 这样的方式被灰色保护。
 
 $$
 {Stack \enspace is \enspace dark} \wedge {Stack \rightarrow  \cdots  \rightarrow W} \iff {\exists G \rightarrow W_1 \rightarrow \cdots \rightarrow W_n \rightarrow W} \tag{T4}
@@ -81,7 +81,7 @@ $W$ 是一个下述各种操作中的一种操作执行完后被黑色对象 $B$
 - ptr : 指向新的对象指针
 - oldptr : 指向旧对象的指针，也就是未将 `ptr` 赋值给 `obj.slot` 前 `obj.slot` 中保存在值
 
-1. 情况 1：$B ≠ obj$ 此时 $W$ 一直被 $B$ 指向，那么在写入前如果保护序列中不包含 `obj.slot` 那么 $W$ 的灰色保护在写入后依然不会被破坏，反之包含 `obj.slot` 说明在写入前存在一条这样的序列 $G \rightarrow W_1 \rightarrow \cdots \xrightarrow{obj.slot} O_{oldptr} \rightarrow \cdots \rightarrow W$ 由于删除写屏障会将$O_{oldptr}$置为灰色对象 $O_{oldptr} \iff G_{oldptr}$，此时必定存在序列 $G_{oldptr} \rightarrow \cdots \rightarrow W$ 使得 $W$ 被灰色保护。
+1. 情况 1： $B ≠ obj$ 此时 $W$ 一直被 $B$ 指向，那么在写入前如果保护序列中不包含 `obj.slot` 那么 $W$ 的灰色保护在写入后依然不会被破坏，反之包含 `obj.slot` 说明在写入前存在一条这样的序列 $G \rightarrow W_1 \rightarrow \cdots \xrightarrow{obj.slot} O_{oldptr} \rightarrow \cdots \rightarrow W$ 由于删除写屏障会将 $O_{oldptr}$ 置为灰色对象 $O_{oldptr} \iff G_{oldptr}$，此时必定存在序列 $G_{oldptr} \rightarrow \cdots \rightarrow W$ 使得 $W$ 被灰色保护。
 
 2. 情况 2： $B = obj$ 此时 $W$ 在写入后才被黑色对象 $B$ 指向，此时存在两种情况。
 
@@ -96,7 +96,7 @@ $W$ 是一个下述各种操作中的一种操作执行完后被黑色对象 $B$
 - ptr : 指向新的对象指针
 - oldptr : 指向旧对象的指针，也就是未将 `ptr` 赋值给 `obj.slot` 前 `obj.slot` 中保存在值
 
-1. 情况 1：$B = stk \wedge W = ptr$ 这种情况中在写入操作前可能 $W$ 并没有被任何黑色对象指向，但因为 $ptr$ 一定是通过一个栈获取的且这个栈一定是 $B$ 所属的 `stk`, 又因为 $B$ 是黑色的所以 `stk` 也是黑色的，根据 $T4$ $W$依然被灰色保护。
+1. 情况 1： $B = stk \wedge W = ptr$ 这种情况中在写入操作前可能 $W$ 并没有被任何黑色对象指向，但因为 $ptr$ 一定是通过一个栈获取的且这个栈一定是 $B$ 所属的 `stk`, 又因为 $B$ 是黑色的所以 `stk` 也是黑色的，根据 $T4$ $W$依然被灰色保护。
 
 2. 情况 2：其他情况也就是 $B \ne stk$ 下 $W$ 一定在写入操作前就已经被 $B$ 指向，根据假设 $W$ 在写入操作前就被灰色保护了
 
@@ -110,10 +110,10 @@ $W$ 是一个下述各种操作中的一种操作执行完后被黑色对象 $B$
 
 - $obj_s$ ：已经被扫描过的栈对象
 
-逻辑和堆对象一致不会破坏$T1$
+逻辑和堆对象一致不会破坏 $T1$
 
 ##### 考虑分配对象(堆分配/栈分配/栈创建)
 
-因为屏障开启期间，分配器会开启黑色赋值器，新增对象都是黑色依然不会破坏$T1$
+因为屏障开启期间，分配器会开启黑色赋值器，新增对象都是黑色依然不会破坏 $T1$
 
 ###### 到这里结论就是已经证明混合写屏障可以保证 $T1$ 不会被破坏。
