@@ -9,10 +9,10 @@ X 代表全局对象，其不可能为白色
 $$
 \begin{gather}
 B_i \in Black \\
-G_i \in Green \\
+G_i \in Gray \\
 W_i \in White \\
 X \in Global \wedge X \notin White \\
-H = \lbrace Black,Green,White \rbrace \\
+H = \lbrace Black,Gray,White \rbrace \\
 \forall B \rightarrow W \enspace \exists G \rightarrow W_1 \rightarrow  \cdots  \rightarrow W_{n} \rightarrow W \\
 \tag{T1}
 \end{gather}
