@@ -7,13 +7,15 @@ B,G,W,H 分别代表黑色，灰色，白色，全部堆对象集合
 X 代表全局对象，其不可能为白色
 
 $$
+\begin{gather}
 B_i \in Black \\
 G_i \in Green \\
 W_i \in White \\
 X \in Global \wedge X \notin White \\
 H = \lbrace Black,Green,White \rbrace \\
-{\forall}B{\rightarrow}W \enspace {\exists}G{\rightarrow}W_1{\rightarrow} \cdots {\rightarrow}W_{n}{\rightarrow}W \\
+\forall B \rightarrow W \enspace \exists G \rightarrow W_1 \rightarrow  \cdots  \rightarrow W_{n} \rightarrow W \\
 \tag{T1}
+\end{gather}
 $$
 
 引理 1--- 所有被黑色对象直接指向的白色对象都处于灰色保护下
@@ -37,11 +39,11 @@ $$
 证明：
 
 1. 因为栈上对象只只能指向自己栈上对象或堆对象，又因为栈的颜色是原子改变的（要么全黑要么全灰）因此不会出现黑指向白，所以 $O_1$ 一定是堆对象。
-2. 又因为 $T2$ 所以$O_2$ 到 $O_n$ 一定都为堆对象。
+2. 又因为 $T2$ 所以 $O_2$ 到 $O_n$ 一定都为堆对象。
 3. 如果 $O_i$ 不存在那么引理 3 退回到 $T1$。
-4. 如果 $O_i$ 中存在黑色对象那么回到证明开始并以此黑色对象为起点开始证明$T3$
+4. 如果 $O_i$ 中存在黑色对象那么回到证明开始并以此黑色对象为起点开始证明 $T3$
 5. 如果 $O_i$ 中存在灰色对象那么 $W$ 一定被灰色保护。
-6. 如果 $O_i$ 都为白色对象，那么因为$O_1$ 被黑色对象指向，因为 $T1$ 所以 $O_1$ 一定被某个灰色对象以 $G \rightarrow W_1 \rightarrow \cdots \rightarrow W_n \rightarrow O_1$ 的方式保护，那么 $W$ 一定以 $G \rightarrow W_1 \rightarrow \cdots \rightarrow W_n \rightarrow O_1 \rightarrow \cdots \rightarrow O_n \rightarrow W$ 这样的方式被灰色保护。
+6. 如果 $O_i$ 都为白色对象，那么因为 $O_1$ 被黑色对象指向，因为 $T1$ 所以 $O_1$ 一定被某个灰色对象以 $G \rightarrow W_1 \rightarrow \cdots \rightarrow W_n \rightarrow O_1$ 的方式保护，那么 $W$ 一定以 $G \rightarrow W_1 \rightarrow \cdots \rightarrow W_n \rightarrow O_1 \rightarrow \cdots \rightarrow O_n \rightarrow W$ 这样的方式被灰色保护。
 
 $$
 {Stack \enspace is \enspace dark} \wedge {Stack \rightarrow  \cdots  \rightarrow W} \iff {\exists G \rightarrow W_1 \rightarrow \cdots \rightarrow W_n \rightarrow W} \tag{T4}
