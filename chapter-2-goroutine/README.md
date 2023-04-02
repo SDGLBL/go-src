@@ -294,7 +294,76 @@ flowchart LR
   click C "https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L1456-L1495"
 ```
 
-###
+这个过程中最重要的就是最后的 `mstart1` 中最后一行代码 [`schedule()`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L3318-L3388)，其会调用[`findRunnable()`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L2657-L2998)依次尝试从当前 `p` 的局部队列，全局队列，`netpool`中获取可运行的`g`，如果没有的话就尝试从其他 `p` 那里偷取一半的 `g` 来运行。对于此时便是我们在刚才放入队列的 `newg` 会被调度获取并被函数 [`execute`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L2608-L2655) 所执行。
+
+```go
+func execute(gp *g, inheritTime bool) {
+    // ...... 省略 ......
+    gogo(&gp.sched)
+}
+```
+
+可以看到 `execute` 函数本质上是通过调用 `gogo` 函数来执行我们传入的 `gp` 也就是 `newg` ，而 `gogo` 函数在代码中并没有实现，而是使用汇编代码编写，其内容如下 [`runtime·gogo`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/asm_amd64.s#L401-L422)。
+
+不过看懂其做了什么的前提是我们首先得了解 [`gp.sched`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/runtime2.go#L322-L342) 是用来干什么的。
+
+```go
+type gobuf struct {
+    sp   uintptr
+    pc   uintptr
+    g    guintptr
+    ctxt unsafe.Pointer
+    ret  uintptr
+    lr   uintptr
+    bp   uintptr // for framepointer-enabled architectures
+}
+```
+
+在前面的 [`newproc1`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L4245-L4337) 中有段如下[`代码`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L4280-L4285) 负责对创建的 `newg` 的 `sched` 字段内存进行置空和赋值。
+
+```go
+// ..... 省略 .....
+memclrNoHeapPointers(unsafe.Pointer(&newg.sched), unsafe.Sizeof(newg.sched))
+newg.sched.sp = sp
+newg.stktopsp = sp
+newg.sched.pc = abi.FuncPCABI0(goexit) + sys.PCQuantum // +PCQuantum so that previous instruction is in same function
+newg.sched.g = guintptr(unsafe.Pointer(newg))
+gostartcallfn(&newg.sched, fn)
+// ..... 省略 .....
+```
+
+可以看到其中存储的变量就包含了描述我们创建的 `newg` 所需要的信息，包括 `newg` 栈的栈指针 `sp`, 程序计数器 `pc` etc... 这些执行 `newg` 必备的信息。而 `gogo` 要做的事情就是利用这些准备好的数据来执行 `newg`。因此我们看到下面汇编实现的 `gogo` 是如何利用这些数据的。
+
+```assembly
+// func gogo(buf *gobuf)
+// restore state from Gobuf; longjmp
+TEXT runtime·gogo(SB), NOSPLIT, $0-8
+    //
+    MOVQ	buf+0(FP), BX		// gobuf
+    MOVQ	gobuf_g(BX), DX
+    MOVQ	0(DX), CX		// make sure g != nil
+    JMP	gogo<>(SB)
+
+TEXT gogo<>(SB), NOSPLIT, $0
+    // 将当前执行 g (在这个时候是g0) 移动到 CX 寄存器上
+    get_tls(CX)
+    // 将需要启动的 gp 赋值移动到当前执行 g 的 gobuf.g 上
+    // gobuf.g 在创建的时候指向自身，被启动的协程的父协程的 gobuf.g 会被在启动的时候
+    // 被这一行修改指向其子协程，也就是 gp
+    MOVQ	DX, g(CX)
+    MOVQ	DX, R14		// set the g register
+    MOVQ	gobuf_sp(BX), SP	// restore SP
+    MOVQ	gobuf_ret(BX), AX
+    MOVQ	gobuf_ctxt(BX), DX
+    MOVQ	gobuf_bp(BX), BP
+    MOVQ	$0, gobuf_sp(BX)	// clear to help garbage collector
+    MOVQ	$0, gobuf_ret(BX)
+    MOVQ	$0, gobuf_ctxt(BX)
+    MOVQ	$0, gobuf_bp(BX)
+    MOVQ	gobuf_pc(BX), BX
+    JMP	BX
+
+```
 
 ## 链接
 
@@ -311,7 +380,3 @@ flowchart LR
 [6] [ELF Handling For Thread-Local Storage](https://akkadia.org/drepper/tls.pdf)
 
 [7] [VSystemCall](https://www.ukuug.org/events/linux2001/papers/html/AArcangeli-vsyscalls.html)
-
-```
-
-```
