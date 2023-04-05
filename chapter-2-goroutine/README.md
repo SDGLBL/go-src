@@ -340,6 +340,7 @@ gostartcallfn(&newg.sched, fn)
 TEXT runtime·gogo(SB), NOSPLIT, $0-8
     //
     MOVQ	buf+0(FP), BX		// gobuf
+    // 注意 gobuf_g 其值为指向 gp 的指针
     MOVQ	gobuf_g(BX), DX
     MOVQ	0(DX), CX		// make sure g != nil
     JMP	gogo<>(SB)
@@ -347,11 +348,14 @@ TEXT runtime·gogo(SB), NOSPLIT, $0-8
 TEXT gogo<>(SB), NOSPLIT, $0
     // 将当前执行 g (在这个时候是g0) 移动到 CX 寄存器上
     get_tls(CX)
-    // 将需要启动的 gp 赋值移动到当前执行 g 的 gobuf.g 上
-    // gobuf.g 在创建的时候指向自身，被启动的协程的父协程的 gobuf.g 会被在启动的时候
+    // 将需要启动的 gp 的指针赋值移动到当前执行 g 的 gobuf.g 上
+    // gobuf.g 在创建的时候指向自身，被启动的协程的父协程的 gobuf.g 会被
     // 被这一行修改指向其子协程，也就是 gp
     MOVQ	DX, g(CX)
+    // 将当前被启动的 g 存储到 R14 寄存器上, 也就是amd64 平台的 R14 寄存器上
+    // 关于这部分参考本文 TLS 部分内容
     MOVQ	DX, R14		// set the g register
+    // 下面四行就是将 gp 分配好的栈指针，上下文指针，栈址指针等放置到对应寄存器上
     MOVQ	gobuf_sp(BX), SP	// restore SP
     MOVQ	gobuf_ret(BX), AX
     MOVQ	gobuf_ctxt(BX), DX
@@ -360,10 +364,34 @@ TEXT gogo<>(SB), NOSPLIT, $0
     MOVQ	$0, gobuf_ret(BX)
     MOVQ	$0, gobuf_ctxt(BX)
     MOVQ	$0, gobuf_bp(BX)
+    // 将需要指向函数的指针也就是 gp 的 pc 赋值到 BX 寄存器
     MOVQ	gobuf_pc(BX), BX
+    // 跳转到 BX 寄存器存储的指令指针位置 开始执行指令 (在这里是执行runtime.main的第一条指令)
     JMP	BX
-
 ```
+
+- [gobuf_g 被赋值的位置](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L4284)
+- [gobuf_pc 被赋值位置](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/sys_arm64.go#L9-L18)
+
+到这里我们就成功开始启动并执行创建的 `newg` 协程了，其第一条指令在 `gogo<>` 最后一行 `JMP BX` 被执行。到此我们就看到第一个协程 `g0` 如何被创建的，以及随后创建的第二个用于执行 `runtime.main` 的协程如何被创建和执行的，最后剩下的便是我们编写的 `mian.main` 如何被 `runtime.main` 调用执行的。
+
+### 最后的执行--- `main.main`
+
+```go
+package runtime
+
+//go:linkname main_main main.main
+func main_main()
+
+func main() {
+  // ...... 省略 ......
+	fn := main_main // make an indirect call, as the linker doesn't know the address of the main package when laying down the runtime
+	fn()
+  // ...... 省略 ......
+}
+```
+
+可以看到最后在 `runtime.main` 执行的实际上是一个叫做 `main_main` 的函数，其具体的地址会在链接阶段被链接器链接到 `main.main` 上，到此我们就看到了一个 go 程序启动的全部过程，而其中我们创建的任何协程也都是从 `newproc` 开始按照完全相同的方式开始执行的。到此我们就能理解一个 go 程序从我们将其载入到内存到开始执行都发生什么，这也是理解后续调度器原理的必备知识。
 
 ## 链接
 
