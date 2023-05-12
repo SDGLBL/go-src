@@ -38,15 +38,15 @@ func main() {
 	fmt.Printf("a: %b\n", *(*[8]byte)(unsafe.Pointer(&a)))
 
 	b := -a
-	fmt.Println("b: ", b)
-	fmt.Printf("b: %b\n", *(*[8]byte)(unsafe.Pointer(&b)))
+	fmt.Println("-a : ", b)
+	fmt.Printf("-a: %b\n", *(*[8]byte)(unsafe.Pointer(&b)))
 
 	c := a & b
-	fmt.Println("c: ", c)
-	fmt.Printf("c: %b\n", *(*[8]byte)(unsafe.Pointer(&c)))
+	fmt.Println("a & -a: ", c)
+	fmt.Printf("a & -a: %b\n", *(*[8]byte)(unsafe.Pointer(&c)))
 
 	de := 0x03f79d71b4ca8b09
-	fmt.Println("de: ", de)
-	fmt.Printf("de: %b\n", *(*[8]byte)(unsafe.Pointer(&de)))
-	fmt.Println("TrailingZeros64 res: ", TrailingZeros64(a))
+	fmt.Println("deBruijn64: ", de)
+	fmt.Printf("deBruijn64 bit array: %b\n", *(*[8]byte)(unsafe.Pointer(&de)))
+	fmt.Println("deBruijn64tab[(x&-x)*deBruijn64>>(64-6)]: ", TrailingZeros64(a))
 }
