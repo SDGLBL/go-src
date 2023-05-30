@@ -1,3 +1,12 @@
+## 垃圾回收
+
+垃圾回收过程是一个涉及多个阶段的过程，从编译期的垃圾回收信息标记，到运行期的信息分析，赋值器染色控制，回收器空间回收，如果回收还包括空间整理可能还会引入分代回收机制等过程（go 没有）。
+如非专业弄懂所有细节几乎是不可能的事情（因为太复杂了），此篇只对最基本的流程进行说明和少许分析，更多的是关注源码实现的过程，建立一种大概印象而非追根刨底式的阐述所有算法细节（因为我也不甚了解 😂)）。
+
+### Mutator 赋值器
+
+### Collector 回收器
+
 ## 三色抽象
 
 ### 三色抽象
@@ -45,6 +54,8 @@
 
 > Hook：对屏障的一种称呼，实际上屏障就是一种 Hook 方法，Hook 的对象便是不开启屏障时的写内存操作。
 
+> 此外屏障只在垃圾回收过程中分配对象 `ptr` 才会被使用。
+
 ### Dijkstra Write Barrier / Dijkstra 插入写屏障 + 灰色赋值器
 
 ```go
@@ -58,7 +69,7 @@ func DijkstraWritePointer(slot *unsafe.Pointer, ptr unsafe.Pointer) {
 
 其最大的缺陷便是在处理 `Stack` 上的指针写入时不得不考虑采取 1. 使用 `Dijkstra` 写屏障在将指针写入到栈上时进行染色（意味着巨大的性能消耗） 2. STW 并在此期间重新扫描所有栈上变量 两种方案中的一种。在 `1.9` 之前 go 选择的便是第二种方式解决这个问题。
 
-> 因为 `Stack` 上的指针指向的对象是 `GC` 开始扫描的对象，如果我们在向一个已经被 `GC` 扫描过的 `Stack` 上保存指针同时不对其染色的时候，我们无法确定被保存的指针是否指向的是一个白色对象，也就违反了在三色原则中我们提到的根本原则。
+> 因为 `Stack` 上的指针指向的对象是 `GC` 开始扫描的对象，如果我们在向一个已经被 `GC` 扫描过的 `Stack` 上保存指针同时不对其染色的时候，我们无法确定被保存的指针是否指向的是一个白色对象，也就无法保证三色原则中我们提到的根本原则，因此在 1.8 之前 go 会将垃圾回收过程中正在运行且在上进行了对象分配的的 stack 暂时保守性得染为灰色，其他栈则恒染为黑色，直到这个回收间隔最后 STW 的时候垃圾回收器最后重新扫描这些被保守置灰栈将它们从灰色置为黑色，保证在运行过程中新分配的栈上 `ptr` 指向的所有白色对象都被正常扫描到。
 
 ### Yuasa Write Barrier / Yuasa 删除写屏障 + 灰色赋值器
 
@@ -72,17 +83,13 @@ func YuasaWritePointer(slot *unsafe.Pointer, ptr unsafe.Pointer) {
 
 `Yuasa` 写屏障不同于 `Dijkstra` 的地方就在于它染色的目标不是需要写入的值 `ptr` ，而是需要写入位置原来的指针 `rawPtr`，随后将 `ptr` 赋值到 `slot` 位置。也就是其确保了**弱三色不变原则**不被破坏，因为在写入 `ptr` 前原指针 `rawPtr` 会被 shade 染为灰色，此时 `rawPtr` 以及其指向对象所引用的其他对象都能保证被 `GC` 扫描到以此满足了 `根本原则`。因此通过这种方式可以完全实现不需要像`Dijkstra` 算法那样的标记后的 `STW Stack Scaning` 阶段，直接回收所有需要回收的白色对象。
 
-其最大的缺陷有如下两点
+其最大的缺陷如下两点
 
-1. 其需要在起始时进行 `STW` 并扫描所有栈保证由黑色对象指向的任何白色对象都受到灰色堆对象的保护
-
-> 被灰色保护指对象可以通过一个灰色堆对象被访问到 也就是${\forall}B{\rightarrow}W \enspace {\exists}G{\rightarrow}W_1{\rightarrow}...{\rightarrow}W_n{\rightarrow}W \wedge G \in Heap Object$
-
-> 如果我们不在开始时进行 `STW` 扫描所有栈的话是无法保证**弱三色不变原则**，比如一个栈被扫描完为黑一个栈还未被扫描此时如果将前者某个包含的黑色堆对象包含的指针指向后者中一个指向堆的白色对象，此时就会出现一个白色对象只被黑色对象指向，同时违背了`强/弱原则`。
-
-2. 其 `shade(*slot)` 的拦截写操作会导致扫描中对象可能出现从 黑色 -> 灰色得转化从而导致此对象被 `GC` 二次扫描而形成波面的后退，降低 `GC` 性能。
+1. 其 `shade(*slot)` 的拦截写操作会导致扫描中对象可能出现从 黑色 -> 灰色得转化从而导致此对象被 `GC` 二次扫描而形成波面的后退，降低 `GC` 性能。
 
 > `GC` 扫描标记可回收对象的过程就像一个海浪拂过对象之海一样，未标记与已标记对象的分界便是一个分界面，我们称其为**波面**。
+
+2. 其扫描精度太低
 
 ### Dijkstra & Yuasa 两种屏障总结
 
@@ -122,6 +129,14 @@ writePointer(slot, ptr):
 
 <dlv color="green">TODO:</dlv>
 
+垃圾回收实现的原理决定了其涉及到如何标记对象，如何更新标记，如何回收标记了的对象多个过程，而这些过程又和语言本身的 ABI、内存结构，调用公约等设计息息相关，因此源码分析将会涉及到内存分配（分配时的初始标记），内存扫描（更新标记），内存回收（垃圾回收），逃逸分析（排除不需要 gc 的对象）....等。如果涉及内容在其他小节建议先阅读对应章节再继续。
+
 ## 链接
 
 [1] [Eliminate STW stack re-scanning](https://github.com/golang/proposal/blob/master/design/17503-eliminate-rescan.md)
+
+[2] [Runtime Symbol Infomation](https://docs.google.com/document/d/1lyPIbmsYbXnpNj57a261hgOYVpNRcgydurVQIyZOz_o/pub)
+
+[3] [Yuasa 可终止证明](https://core.ac.uk/download/pdf/39218501.pdf)
+
+[4] [Uniprocessor Garbage Collection Techniques](https://www.cs.cmu.edu/~fp/courses/15411-f14/misc/wilson94-gc.pdf)
