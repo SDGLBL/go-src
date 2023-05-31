@@ -1,6 +1,19 @@
 # Chapter 2: Go 协程
 
-[TOC]
+<!--toc:start-->
+
+- [Chapter 2: Go 协程](#chapter-2-go-协程)
+  - [Go 程序的启动](#go-程序的启动)
+    - [Go 程序的 Entry Point](#go-程序的-entry-point)
+    - [g0 协程的初始化](#g0-协程的初始化)
+    - [TLS 的内部实现](#tls-的内部实现)
+    - [存储 g0 协程的初始化 到 TLS](#存储-g0-协程的初始化-到-tls)
+    - [检查并初始化系统参数](#检查并初始化系统参数)
+    - [加载 runtime.main 并创建新 P](#加载-runtimemain-并创建新-p)
+    - [运行 runtime.mstart](#运行-runtimemstart)
+    - [最后的执行 main.main](#最后的执行-mainmain)
+  - [链接](#链接)
+  <!--toc:end-->
 
 在这个章节将会介绍 Go 协程的实现机制，启动与执行方式。首先我们会通过讲解程序启动的过程来介绍特殊协程`g0`的启动过程从而理解最初的 go 协程是如何启动与初始化的，随后我们会深入到`runtime`中启动代码中用户定义的`go func() {}`函数代码来了解`g0`如何挂载在`m0`上调度并执行用户定义的协程。
 
@@ -96,7 +109,7 @@ TEXT runtime·rt0_go(SB),NOSPLIT|TOPFRAME,$0
   # 可以看到此函数才是真正开始执行启动的汇编函数
 ```
 
-### [g0](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L115)协程的初始化
+### g0 协程的初始化
 
 接下来的分析中将会忽视掉 `runtime·rt0_go` 中对程序启动主体逻辑理解没有影响的代码，我们只关注 g0 是什么，g0 的关键 filed 是如何被初始化的，g0 在后续执行中扮演的角色，此外由于此过程冗长复杂，因此将函数分为多个部分来介绍。
 首先是基础的栈空间分配，仔细阅读了 chapter-1 的读者直接就能看出这部分只是简单分配了 48 字节的栈空间，顺便将 argc 与 argv 指针保存到了`SP+24`与`SP+32`的栈位置上。
@@ -191,7 +204,7 @@ TEXT runtime·settls(SB),NOSPLIT,$32
 
 > get_tls 只是个简单宏定义`#define	get_tls(r)	MOVL TLS, r`起作用仅仅是把 TLS 寄存器保存的 g 指针读取到指定的寄存器，g(BX)实际也是宏替换`#define	g(r)	0(r)(TLS*1)` -> `0(BX)(TLS*1)`其中`0(BX)`代表`BX`偏移为 0 的位置，后面的`(TLS*1)`只是一个标识符。具体细节请阅读[ELF Handling For Thread-Local Storage](https://akkadia.org/drepper/tls.pdf)中的 4.4.6 了解 x86-64 平台获取`TLS`的标准指令序列。
 
-### 存储 [g0](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L115) 协程的初始化 到 TLS
+### 存储 g0 协程的初始化 到 TLS
 
 正如前面所说`TLS`保存有当前正在执行的 go 协程实例指针，而当前有且只有准备好的`g0`协程需要执行，因此下一步便是将准备好的`g0`存储到`TLS`中。也就是[下面指令](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L264-L275)中的 `LEAQ	runtime·g0(SB), CX`和`MOVQ	CX, g(BX)`，随后就是把 m0.g0 指向`runtime.g0`以及 g0.m 指向`runtime.m0`（这部分涉及第三章 scheduler 中 GMP 部分知识）。
 
@@ -233,7 +246,7 @@ flowchart LR
 
 最后的[osinit](https://github.com/golang/go/blob/55eaae452cf69df768b2aaf6045db22d6c1a4029/src/runtime/os_linux.go#L329-L351)和[schedinit](https://github.com/golang/go/blob/55eaae452cf69df768b2aaf6045db22d6c1a4029/src/runtime/proc.go#L665-L769)前者只是简单的通过`systemcall`获取一下 cpu 数量然后将其记录到[`ncpu`](https://github.com/golang/go/tree/master/src/runtime/runtime2.go#L1135)中，对于`schedinit`则复杂得多，其负责初始化运行时内容并进行各种检查关于这部分内容将会在第三章详细讲解。
 
-### 加载 [runtime.main 并创建新 P](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L347-L351)
+### 加载 runtime.main 并创建新 P
 
 首先[`$runtime·mainPC`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L375-L379)实际上指向了[`runtime.main`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L145-L279)函数。
 这部分的指令很简单只是将`$runtime·mainPC`的地址存储到`AX`寄存器中随后将`AX`中的值存储到 stack 上，并作为`runtime·newproc`的入参来使用，所以下面我们来重点关注 newproc 做了什么并如何使用 stack 上的`$runtime·mainPC`
@@ -277,7 +290,7 @@ func newproc(fn *funcval) {
 
 完成上述过程后机会执行启动函数 `rt0_go` 最后的步骤
 
-### 运行 [runtime.mstart](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L1405-L1454)
+### 运行 runtime.mstart
 
 ```asm
 CALL	runtime·mstart(SB) // start this M
@@ -375,7 +388,7 @@ TEXT gogo<>(SB), NOSPLIT, $0
 
 到这里我们就成功开始启动并执行创建的 `newg` 协程了，其第一条指令在 `gogo<>` 最后一行 `JMP BX` 被执行。到此我们就看到第一个协程 `g0` 如何被创建的，以及随后创建的第二个用于执行 `runtime.main` 的协程如何被创建和执行的，最后剩下的便是我们编写的 `mian.main` 如何被 `runtime.main` 调用执行的。
 
-### 最后的执行--- `main.main`
+### 最后的执行 main.main
 
 ```go
 package runtime
