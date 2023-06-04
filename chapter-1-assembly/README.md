@@ -1,8 +1,25 @@
 # Chapter 1: Go 汇编
 
-​ 在开始更深入了解 Go 的内部实现前我们必须对 Go 语言的汇编表示有所了解，同时此章节对其他语言的学习者也应该有所裨益，因此我将汇编作为第一章的内容，希望接下来的内容能帮助大家在后续的阅读中更快掌握精髓。
+<!--toc:start-->
 
-[TOC]
+- [Chapter 1: Go 汇编](#chapter-1-go-汇编)
+  - [前言](#前言)
+  - [伪汇编](#伪汇编)
+  - [简单的程序](#简单的程序)
+  - [第一个程序](#第一个程序)
+    - [深入 simple 函数](#深入-simple-函数)
+    - [深入 main 函数](#深入-main-函数)
+    - [总结](#总结)
+  - [第二个程序](#第二个程序)
+    - [深入 simple.set 方法](#深入-simpleset-方法)
+    - [深入 simple.setp 方法](#深入-simplesetp-方法)
+    - [深入 main 方法](#深入-main-方法)
+    - [总结](#总结)
+  - [第三个程序](#第三个程序)
+  - [链接](#链接)
+  <!--toc:end-->
+
+​ 在开始更深入了解 Go 的内部实现前我们必须对 Go 语言的汇编表示有所了解，同时此章节对其他语言的学习者也应该有所裨益，因此我将汇编作为第一章的内容，希望接下来的内容能帮助大家在后续的阅读中更快掌握精髓。
 
 ## 前言
 
@@ -25,7 +42,7 @@ go version go1.18.4 linux/amd64
 
 ## 伪汇编
 
-​ 就像我们描述算法使用伪代码一样，Go Compiler 实际上并不会直接生成对应平台的汇编代码相反的它只是像 Java Compiler 生成字节码一样生成伪汇编代码，有所不同的地方在与 Java Compiler 生成的字节码将会被 VM 执行的时候翻译成可执行指令而 Go Compiler 生成的伪汇编代码将会被 Go Assembler 解析并根据当前平台或指定目标平台生成对应的汇编代码，对此感兴趣的读者可以自行阅读[1]。
+​ 就像我们描述算法使用伪代码一样，Go Compiler 实际上并不会直接生成对应平台的汇编代码相反的它只是像 Java Compiler 生成字节码一样生成伪汇编代码，有所不同的地方在与 Java Compiler 生成的字节码将会被 VM 执行的时候翻译成可执行指令而 Go Compiler 生成的伪汇编代码将会被 Go Assembler 解析并根据当前平台或指定目标平台生成对应的汇编代码，对此感兴趣的读者可以自行阅读 [**The Design of the Go Assembler**](#链接) [^1]。
 
 ​ 因此下面所有说到的汇编皆是指代伪汇编，也就是 Go 语言使用的 Plan9 汇编。
 
@@ -122,7 +139,7 @@ $ objdump -j .text -t simple-go  | grep main.simple
 0000000100051550 l     F __TEXT,__text _main.simple
 ```
 
-- `NOSPLIT|ABIInternal`：则是给编译器的标识符，`NOSPLIT`用于告诉编译器不需要在此函数自动插入用于检查函数 stack 是否需要进行扩容的**_stack-split_**检查指令。`ABIInternal`标识此汇编调用规约为 ABIInternal，简单的说 Go 目前有 ABI0 ABIInternal ABI1 三中调用规约，前两者已经实现并使用，在未来当 ABIInternal 稳定后将会变为 ABI1，随后 ABI1 将会继续发展。对于更详细的计划和情况读者可以阅读[3] [Go internal ABI specification](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md)和[4] [Internal ABI Proposal](https://go.googlesource.com/proposal/+/master/design/27539-internal-abi.md)。
+- `NOSPLIT|ABIInternal`：则是给编译器的标识符，`NOSPLIT`用于告诉编译器不需要在此函数自动插入用于检查函数 stack 是否需要进行扩容的**_stack-split_**检查指令。`ABIInternal`标识此汇编调用规约为 ABIInternal，简单的说 Go 目前有 ABI0 ABIInternal ABI1 三中调用规约，前两者已经实现并使用，在未来当 ABIInternal 稳定后将会变为 ABI1，随后 ABI1 将会继续发展。对于更详细的计划和情况读者可以阅读 [**Go internal ABI specification**](#链接) [^3] 和 [**Internal ABI Proposal**](#链接) [^4]。
 
 - `$0-8`：`$0`表示此函数执行将会申请的栈帧大小为 0，`$8`则是表示由调用者（main 函数）传递给被调用者（simple 函数）的参数大小。
 
@@ -136,7 +153,7 @@ $ objdump -j .text -t simple-go  | grep main.simple
 0x0000 00000 (simple.go:4)	PCDATA	$3, $1
 ```
 
-​ 上述的`FUNCDATA`与`PCDATA`便是 Compiler 在编译过程中自动插入的执行期信息保存指令，他们存储的信息将会在运行期间被垃圾回收器以及 runtime 使用，因为对于绝大部分读者这些指令了解与否对理解程序执行不会有太大影响因此我们先暂时跳过它们，在后面的垃垃圾回收器章节我们会再来详细讲解它们。如果你对它们现在就十分好奇那可以选择阅读 [Runtime Symbol Information](https://docs.google.com/document/d/1lyPIbmsYbXnpNj57a261hgOYVpNRcgydurVQIyZOz_o/pub)进行了解。同时在后续讲解中我们先暂时忽视它们。
+​ 上述的`FUNCDATA`与`PCDATA`便是 Compiler 在编译过程中自动插入的执行期信息保存指令，他们存储的信息将会在运行期间被垃圾回收器以及 runtime 使用，因为对于绝大部分读者这些指令了解与否对理解程序执行不会有太大影响因此我们先暂时跳过它们，在后面的垃垃圾回收器章节我们会再来详细讲解它们。如果你对它们现在就十分好奇那可以选择阅读 [**Runtime Symbol Information**](#链接) [^2] 进行了解。同时在后续讲解中我们先暂时忽视它们。
 
 > 实际上对于这些指令我也没有想到好的名称，再考虑到这些指令对于 Linker 是透明的其本身也只是一种在 Compile 阶段与 Runtime 阶段传递必要辅助信息需要的手段，因此姑且把他们统一叫做执行期信息保存指令。
 
@@ -148,7 +165,7 @@ $ objdump -j .text -t simple-go  | grep main.simple
 
 ​ 对于`CMPQ AX, $1`将会对比 AX 寄存器存储值和 1 的大小,`SETEQ AL`则会根据上一条`CMPQ`指令对比的结果决定`AL`中将会写入的值。简单的说当 CMPQ 返回相等时 AL 将会被置为 1 并对应 simple 函数返回的 bool 值，因为我们在 mian 函数中并没有使用返回值因此汇编代码中也没有其他地方使用了`AL`。感兴趣的读者可以试着让 simple 函数的返回值赋值给一个变量看看汇编代码有何改变。最后的`RET`指令则显然就是简单的返回上一级调用
 
-> 需要注意的是在 go1.17 以前 go 语言只支持使用 stack 来传递调用参数，在 1.17 及以后 go 在**部分平台**实现了基于 register 的参数传递规约具体详情可以查看[5] [Go 1.17 Release Note](https://go.dev/doc/go1.17)，不过参数与返回值空间申请和保存依旧如以前一样是交给调用者。
+> 需要注意的是在 go1.17 以前 go 语言只支持使用 stack 来传递调用参数，在 1.17 及以后 go 在**部分平台**实现了基于 register 的参数传递规约具体详情可以查看 [**Go 1.17 Release Note**](#链接) [^5]，不过参数与返回值空间申请和保存依旧如以前一样是交给调用者。
 
 ### 深入 main 函数
 
@@ -170,7 +187,7 @@ $ objdump -j .text -t simple-go  | grep main.simple
 
 ​ 前两条指令在官方 doc 中被称为**Go stack growth prologue**，也就是在执行前检查当前 SP 寄存器值是否超出`$16-0`所声明的 16 字的 StackFrame 大小，对于`16(R14)`则必须先引入一点点 runtime 的知识，首先`R14`存储有当前**正在执行**的 goroutine 的结构体实例(部分需要关注代码如下)的指针，
 
-> 为何 R14 指向正在执行的 goroutine 可以查看[8] [Internal ABI](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md)
+> 为何 R14 指向正在执行的 goroutine 可以查看 **Internal ABI** [^8]
 
 ```go
 // go/src/runtime/runtime2.go
@@ -198,9 +215,9 @@ type g struct {
 0x0023 00035 (simple.go:10)	ADDQ	$16, SP
 ```
 
-​ 第一行指令将 BP 寄存器中的值保存到 SP+8 位置的栈内存位置，第二行指令并将当前 SP+8 栈内存位置指针保存到 BP 寄存器中，对于初学者这里可能比较绕，可以查看[6] [Difference between MOV and LEA](https://stackoverflow.com/questions/1699748/what-is-the-difference-between-mov-and-lea)理解两个指令的差别便可容易理解其含义。随后可以看到在调用完 simple 后的 30 与 35 偏移位置指令就将原先保存在 SP+8 的调用者（main 函数）的 BP 数据取出放回了 BP 寄存器中并回收了刚刚申请的 16 个字节的 stack。
+​ 第一行指令将 BP 寄存器中的值保存到 SP+8 位置的栈内存位置，第二行指令并将当前 SP+8 栈内存位置指针保存到 BP 寄存器中，对于初学者这里可能比较绕，可以查看 **Difference between MOV and LEA** [^6] 理解两个指令的差别便可容易理解其含义。随后可以看到在调用完 simple 后的 30 与 35 偏移位置指令就将原先保存在 SP+8 的调用者（main 函数）的 BP 数据取出放回了 BP 寄存器中并回收了刚刚申请的 16 个字节的 stack。
 
-> 实际上 BP 保存只在 frame size > 0 时出现，一般来说 BP 只用于 kernel 在进行采样分析的时候遍历 stack 使用，一般来说这种情况只会出现在使用 platform debuggers 和 profilers 的时候 ，感兴趣的读者可以阅读[7] [The discussion of BP](https://groups.google.com/g/golang-dev/c/aLn9t8tKg2o/m/Kw-N7lUuBAAJ) &[8] [Internal ABI](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md)。
+> 实际上 BP 保存只在 frame size > 0 时出现，一般来说 BP 只用于 kernel 在进行采样分析的时候遍历 stack 使用，一般来说这种情况只会出现在使用 platform debuggers 和 profilers 的时候 ，感兴趣的读者可以阅读 [**The discussion of BP**](#链接) [^7] & [**Internal ABI**](#链接) [^4]。
 
 ​ 这便到了第一个程序最后我们需要关注的两行指令了
 
@@ -209,7 +226,7 @@ type g struct {
 0x0019 00025 (simple.go:9)	CALL	"".simple(SB)
 ```
 
-​ `MOVL	$1, AX`将数字 1 转移到 AX 寄存器中以供 simple 函数中使用,`CALL	"".simple(SB)`则调用 simple 函数之后便是在最开始我们在[深入 simple 函数](# 深入 simple 函数)中看到的逻辑了。
+​ `MOVL	$1, AX`将数字 1 转移到 AX 寄存器中以供 simple 函数中使用,`CALL	"".simple(SB)`则调用 simple 函数之后便是在最开始我们在[[##深入 simple 函数]]中看到的逻辑了。
 
 ### 总结
 
@@ -342,7 +359,7 @@ $ GOOS=linux GOARCH=amd64 go tool compile -S -l simple2.go >  simple2.s && rm si
 0x001d 00029 (simple2.go:22)	MOVUPS	X15, "".s+56(SP)
 ```
 
-​ `MOVQ  $0, "".s+48(SP)`很简单只是将 SP+48 栈位置赋值为 0，实际上 SP+48 位置也是结构体 simple 在栈中的开始位置，也就是说 SP+48 到 SP+72 的 24 个字节栈空间便是 simple 结构体实例在栈上所占局的空间，`MOVUPS  X15, "".s+56(SP)`可能读者会有所困惑，因为 X15 在 amd64 平台的 Go 汇编中是一个特殊寄存器，在[8] [Internal ABI](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md)中我们可看到 amd64 平台的如下几个特殊寄存器，其中 X15 代表零值，因此偏移值 29 的此行指令便是将 SP+56 到 SP+72 的栈空间全部赋为零值。
+​ `MOVQ  $0, "".s+48(SP)`很简单只是将 SP+48 栈位置赋值为 0，实际上 SP+48 位置也是结构体 simple 在栈中的开始位置，也就是说 SP+48 到 SP+72 的 24 个字节栈空间便是 simple 结构体实例在栈上所占局的空间，`MOVUPS  X15, "".s+56(SP)`可能读者会有所困惑，因为 X15 在 amd64 平台的 Go 汇编中是一个特殊寄存器，在 [**Internal ABI**](#链接) [^4] 中我们可看到 amd64 平台的如下几个特殊寄存器，其中 X15 代表零值，因此偏移值 29 的此行指令便是将 SP+56 到 SP+72 的栈空间全部赋为零值。
 
 > _Rationale_: We designate X15 as a fixed zero register because functions often have to bulk zero their stack frames, and this is more efficient with a designated zero register. 也就是说 X15 寄存器就是一个专门用来存储零值并用来给栈帧批量赋零的寄存器。
 
@@ -379,7 +396,7 @@ $ GOOS=linux GOARCH=amd64 go tool compile -S -l simple2.go >  simple2.s && rm si
 0x0067 00103 (simple2.go:25)	RET
 ```
 
-​ 首先第 69 偏移的指令`LEAQ	"".s+48(SP), AX`将 SP+48 的栈空间地址放进了`AX`寄存器中，随后`BX`,`CX`,`DI`寄存器中分别被放置了 4,5,6 数字值，随后调用 setp 函数，随后便是上面[深入 simple.setp](# 深入 simple.setp 方法)所述的过程，由此可见实际上就是把 4,5,6 值分别放到了 SP+48，SP+56，SP+64 的栈位置也就是 simple 结构体实例的三个 Filed 分别被赋值为 4,5,6，最后便是`ADDQ`指令回收栈空间并调用`RET`会到 runtime.main 函数。
+​ 首先第 69 偏移的指令`LEAQ	"".s+48(SP), AX`将 SP+48 的栈空间地址放进了`AX`寄存器中，随后`BX`,`CX`,`DI`寄存器中分别被放置了 4,5,6 数字值，随后调用 setp 函数，随后便是上面[[##深入 simple.setp 方法]]所述的过程，由此可见实际上就是把 4,5,6 值分别放到了 SP+48，SP+56，SP+64 的栈位置也就是 simple 结构体实例的三个 Filed 分别被赋值为 4,5,6，最后便是`ADDQ`指令回收栈空间并调用`RET`会到 runtime.main 函数。
 
 ### 总结
 
@@ -423,7 +440,9 @@ func main() {
 }
 ```
 
-​ 在开始展示这部分代码的对应汇编代码前，读者最好先自行快速阅读一下[9] [Generic Implememtation](https://go.googlesource.com/proposal/+/30e9a8d11d1e84aafcbb10775b4c7d9e223214fa/design/generics-implementation-dictionaries-go1.18.md)了解 Go 语言目前实现 Generic 的方式，这对理解接下来的汇编代码将有所帮助。对于范型我也会在后续单独开辟第六章节来详细讲解其实现。
+<!-- TODO: 确定泛型章节  -->
+
+​ 在开始展示这部分代码的对应汇编代码前，读者最好先自行快速阅读一下 [**Generic Implementation**](#链接) [^9] 了解 Go 语言目前实现 Generic 的方式，这对理解接下来的汇编代码将有所帮助。对于范型我也会在后续单独开辟第六章节来详细讲解其实现。
 
 > 简单的说 Go 的 Generic 并没有像 C++,Rust 一样通过类型特化（单态化）来实现，也不像 Java 那样抹除了类型信息，而是选择了在两者间的一条道路（Dictionaries and Gcshape Stenciling），这种选择虽然尽可能减少对 Go 语言编译速度的影响，但同时却需要付出难以进行 inline 等编译期优化的代价。具体的取舍与分析详见第六章。
 
@@ -447,22 +466,13 @@ $ GOOS=linux GOARCH=amd64 go tool compile -S  simple3.go >  simple3.s && rm simp
 
 ## 链接
 
-[1]: https://go.dev/talks/2016/asm.slide#1 "The Design of the Go Assembler"
-
-[2] [Runtime Symbol Information](https://docs.google.com/document/d/1lyPIbmsYbXnpNj57a261hgOYVpNRcgydurVQIyZOz_o/pub)
-
-[3] [Go internal ABI specification](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md)
-
-[4] [Internal ABI Proposal](https://go.googlesource.com/proposal/+/master/design/27539-internal-abi.md)
-
-[5] [Go 1.17 Release Note](https://go.dev/doc/go1.17)
-
-[6] [Difference between MOV and LEA](https://stackoverflow.com/questions/1699748/what-is-the-difference-between-mov-and-lea)
-
-[7] [The discussion of BP](https://groups.google.com/g/golang-dev/c/aLn9t8tKg2o/m/Kw-N7lUuBAAJ)
-
-[8] [Internal ABI](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md)
-
-[9] [Generic Implememtation](https://go.googlesource.com/proposal/+/30e9a8d11d1e84aafcbb10775b4c7d9e223214fa/design/generics-implementation-dictionaries-go1.18.md)
-
-[10] [generics-can-make-your-go-code-slower](https://planetscale.com/blog/generics-can-make-your-go-code-slower)
+[^1]: [The Design of the Go Assembler](https://go.dev/talks/2016/asm.slide#1)
+[^2]: [Runtime Symbol Information](https://docs.google.com/document/d/1lyPIbmsYbXnpNj57a261hgOYVpNRcgydurVQIyZOz_o/pub)
+[^3]: [Go internal ABI specification](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md)
+[^4]: [Internal ABI Proposal](https://go.googlesource.com/proposal/+/master/design/27539-internal-abi.md)
+[^5]: [Go 1.17 Release Note](https://go.dev/doc/go1.17)
+[^6]: [Difference between MOV and LEA](https://stackoverflow.com/questions/1699748/what-is-the-difference-between-mov-and-lea)
+[^7]: [The discussion of BP](https://groups.google.com/g/golang-dev/c/aLn9t8tKg2o/m/Kw-N7lUuBAAJ)
+[^8]: [Internal ABI](https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md)
+[^9]: [Generic Implementation](https://go.googlesource.com/proposal/+/30e9a8d11d1e84aafcbb10775b4c7d9e223214fa/design/generics-implementation-dictionaries-go1.18.md)
+[^10]: [generics-can-make-your-go-code-slower](https://planetscale.com/blog/generics-can-make-your-go-code-slower)
