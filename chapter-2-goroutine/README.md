@@ -94,7 +94,7 @@ $ cat disassembly.s | grep 453860
 453860:       e9 3b e3 ff ff          jmpq   451ba0 <_rt0_amd64>
 ```
 
-可以看到整个程序的入口函数是 `_rt0_amd64_linux`，接下来便是要在 go 的 src 代码中找到这个函数的定义，实际上这个函数便位于 `src/runtime/rt0_linux_amd64.s` ，打开这个文件便能看到如下汇编代码。顺着 JMP 一直向下寻找调用的函数我们将会找到真正开始执行的函数叫做 [rt0_go](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L159)，整个跳转调用过程涉及两个文件三个汇编函数他们定义如下。
+可以看到整个程序的入口函数是 `_rt0_amd64_linux`，接下来便是要在 go 的 src 代码中找到这个函数的定义，实际上这个函数便位于 `src/runtime/rt0_linux_amd64.s` ，打开这个文件便能看到如下汇编代码。顺着 JMP 一直向下寻找调用的函数我们将会找到真正开始执行的函数叫做 [rt0_go] ，整个跳转调用过程涉及两个文件三个汇编函数他们定义如下。
 
 ```asm
 TEXT _rt0_amd64_linux(SB),NOSPLIT,$-8
@@ -156,13 +156,11 @@ type g struct {
 
 在`amd64`平台上还有一个特殊的实现其涉及到了一个在`amd64`平台的特殊寄存器`TLS`（**Thread Local Storage**），在`amd64`平台上这个寄存器用来保存当前正在执行的 goroutine 的`g`结构体实例地址。
 
-> 之所以叫 TLS 寄存器只是因为在 go 的伪汇编中将其视作为一个寄存器，实际上在 Linux 内核中以及实际物理 CPU 中是不存在这个寄存器的，其功能依赖于物理寄存器`FS`与`GS`来实现。具体细节可以查看 (简单的说就是把 `TLS` 的地址存放在 `FS` 寄存器中)
+> 之所以叫 TLS 寄存器只是因为在 go 的伪汇编中将其视作为一个寄存器，实际上在 Linux 内核中以及实际物理 CPU 中是不存在这个寄存器的，其功能依赖于物理寄存器`FS`与`GS`来实现。具体细节可以查看 (简单的说就是把 `TLS` 的地址存放在 `FS` 寄存器中) [**TLS code**](#链接) [^3]
 
-> [3] [TLS code](https://elixir.bootlin.com/linux/v2.6.39/source/arch/x86/include/asm/segment.h#L170)。
+> 对于 go 语言中的 TLS 使用&解释可以直接阅读 [**TLS Comment**](#链接) [^4]，下面的汇编中需要运用到此 comment 中包含的知识，建议读者先阅读完再继续向下阅读。
 
-> 对于 go 语言中的 TLS 使用&解释可以直接阅读[4] [TLS Comment](https://github.com/golang/go/blob/a6219737e3eb062282e6483a915c395affb30c69/src/cmd/internal/obj/x86/obj6.go#L72)，下面的汇编中需要运用到此 comment 中包含的知识，建议读者先阅读完再继续向下阅读。
-
-> 需要注意的是在 amd64 平台 R14 寄存器也被用于存储当前正在执行的 go 协程地址，具体解释可以在[5] [abi-internal](https://github.com/golang/go/blob/master/src/cmd/compile/abi-internal.md)的 amd64 架构部分看到
+> 需要注意的是在 amd64 平台 R14 寄存器也被用于存储当前正在执行的 go 协程地址，具体解释可以在 [**ABI-Internal**](#链接) [^6]的 amd64 架构部分看到
 
 在[`runtime/asm_amd64.s`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L232-L263)可以看到如下代码。
 
@@ -184,7 +182,7 @@ needtls:
 
 > 查看源码我们可以看到 m0.tls 的类型是`[tlsSlots]uintptr`其中`tlsSlots`的值等于 6，在源码中对此有所解释 ---- tlsSlots is the number of pointer-sized slots reserved for TLS on some platforms
 
-我们看可以在[`src/runtime/sys_linux_amd64.s`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/sys_linux_amd64.s#L634-L648)找到这个方法的具体实现如下所示。从注释中我们可以看到实际上这一块代码进行了一次`system call`调用了`arch_prctl`，并将`ARCH_SET_FS`[2] [arch_prctl](https://elixir.bootlin.com/linux/v2.6.39/source/arch/um/sys-x86_64/syscalls.c#L35)作为调用参数使用，在这个系统调用中将会初始化`FS`段寄存器的基值位置，对此感兴趣的读者可以自行阅读[1] [The segment](https://thestarman.pcministry.com/asm/debug/Segments.html)，到此为止`SYSCALL`执行前入参便准备好了，其中`SI` = 指向`runtime·m0+m_tls(SB) + 8` 位置，`DI` = `$0x1002`代表常量`ARCH_SET_FS`
+我们看可以在 [`src/runtime/sys_linux_amd64.s`] 找到这个方法的具体实现如下所示。从注释中我们可以看到实际上这一块代码进行了一次`system call`调用了`arch_prctl`，并将`ARCH_SET_FS` [**arch_prctl**](#链接) [^2]作为调用参数使用，在这个系统调用中将会初始化`FS`段寄存器的基值位置，对此感兴趣的读者可以自行阅读 [**The segment**](#链接) [^1]，到此为止`SYSCALL`执行前入参便准备好了，其中`SI` = 指向`runtime·m0+m_tls(SB) + 8` 位置，`DI` = `$0x1002`代表常量`ARCH_SET_FS`
 用于控制`arch_prctl`执行逻辑，`AX` = `$SYS_arch_prctl`指向系统调用位置，执行完后`FS_base`寄存器就存储了`runtime·m0+m_tls(SB) + 8`的地址(实际上就是`[tlsSlots]uintptr`索引为 1 所在地址)。随后的三行便是简单的错误检查了。
 
 ```asm
@@ -202,7 +200,7 @@ TEXT runtime·settls(SB),NOSPLIT,$32
 
 最后 6 行`get_tls(BX)`开始就是简单的加载下 tls 地址，尝试写入数据读取数据检查一下 tls 可不可以正常使用。
 
-> get_tls 只是个简单宏定义`#define	get_tls(r)	MOVL TLS, r`起作用仅仅是把 TLS 寄存器保存的 g 指针读取到指定的寄存器，g(BX)实际也是宏替换`#define	g(r)	0(r)(TLS*1)` -> `0(BX)(TLS*1)`其中`0(BX)`代表`BX`偏移为 0 的位置，后面的`(TLS*1)`只是一个标识符。具体细节请阅读[ELF Handling For Thread-Local Storage](https://akkadia.org/drepper/tls.pdf)中的 4.4.6 了解 x86-64 平台获取`TLS`的标准指令序列。
+> get_tls 只是个简单宏定义`#define	get_tls(r)	MOVL TLS, r`起作用仅仅是把 TLS 寄存器保存的 g 指针读取到指定的寄存器，g(BX)实际也是宏替换`#define	g(r)	0(r)(TLS*1)` -> `0(BX)(TLS*1)`其中`0(BX)`代表`BX`偏移为 0 的位置，后面的`(TLS*1)`只是一个标识符。具体细节请阅读[**ELF Handling For Thread-Local Storage**](#链接) [^6]中的 4.4.6 了解 x86-64 平台获取`TLS`的标准指令序列。
 
 ### 存储 g0 协程的初始化 到 TLS
 
@@ -238,17 +236,17 @@ flowchart LR
 
 ### 检查并初始化系统参数
 
-[`check`&`args`&`osinit`&`schedinit`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L337-L346)在[`check`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/runtime1.go#L142-L296)中`runtime`初始化基础类型实例然后检查了下它们的大小和其他属性，这部分对于理解 go 协程启动无关紧要感兴趣的读者可以自己查看。
+[`check`&`args`&`osinit`&`schedinit`] 在[`check`] 中`runtime`初始化基础类型实例然后检查了下它们的大小和其他属性，这部分对于理解 go 协程启动无关紧要感兴趣的读者可以自己查看。
 
-紧随其后的[`args`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/runtime1.go#L66-L70)就如其名一般负责将参数存储到静态变量中，需要注意的是在 Linux 上此函数还会负责分析[`ELF auxiliary vector`](http://articles.manugarg.com/aboutelfauxiliaryvectors)。
+紧随其后的[`args`] 就如其名一般负责将参数存储到静态变量中，需要注意的是在 Linux 上此函数还会负责分析 [**ELF auxiliary vector**](#链接) [^8]。
 
 > 简单的说在`ELF auxiliary vector`包含了一些操作系统加载程序到内存中并执行需要的信息，比如程序 header 的数量和大小，一些系统调用的具体位置。也就是说它是一种向用户空间传递内核空间信息的机制。
 
-最后的[osinit](https://github.com/golang/go/blob/55eaae452cf69df768b2aaf6045db22d6c1a4029/src/runtime/os_linux.go#L329-L351)和[schedinit](https://github.com/golang/go/blob/55eaae452cf69df768b2aaf6045db22d6c1a4029/src/runtime/proc.go#L665-L769)前者只是简单的通过`systemcall`获取一下 cpu 数量然后将其记录到[`ncpu`](https://github.com/golang/go/tree/master/src/runtime/runtime2.go#L1135)中，对于`schedinit`则复杂得多，其负责初始化运行时内容并进行各种检查关于这部分内容将会在第三章详细讲解。
+最后的 [osinit] 和 [schedinit] 前者只是简单的通过`systemcall`获取一下 cpu 数量然后将其记录到 [`ncpu`] 中，对于`schedinit`则复杂得多，其负责初始化运行时内容并进行各种检查关于这部分内容将会在第三章详细讲解。
 
 ### 加载 runtime.main 并创建新 P
 
-首先[`$runtime·mainPC`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L375-L379)实际上指向了[`runtime.main`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L145-L279)函数。
+首先 [`$runtime·mainPC`] 实际上指向了 [`runtime.main`] 函数。
 这部分的指令很简单只是将`$runtime·mainPC`的地址存储到`AX`寄存器中随后将`AX`中的值存储到 stack 上，并作为`runtime·newproc`的入参来使用，所以下面我们来重点关注 newproc 做了什么并如何使用 stack 上的`$runtime·mainPC`
 
 ```asm
@@ -259,14 +257,14 @@ CALL	runtime·newproc(SB)
 POPQ	AX
 ```
 
-[`newproc`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L4230-L4243)首先我们就能看到其入参`fn *funcval`对应的就是上面提到的`runtime.main`函数，其他的步骤含义参考下方函数中的注释。对于其中调用的函数可以点击如下函数名阅读其定义与注释（注释写得比我写的好 😂 建议看官方的注释了解这些函数）。
+[`newproc`] 首先我们就能看到其入参`fn *funcval`对应的就是上面提到的`runtime.main`函数，其他的步骤含义参考下方函数中的注释。对于其中调用的函数可以点击如下函数名阅读其定义与注释（注释写得比我写的好 😂 建议看官方的注释了解这些函数）。
 
-- [`getg`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/stubs.go#L21-L24)
-  , [`getcallerpc`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/stubs.go#L318-L343)
-  , [`systemstack`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/stubs.go#L42-L61)
-  , [`newproc1`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L4245-L4337)
-  , [`runqput`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L5950-L5986)
-  , [`wakep`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L2496-L2533)
+- [`getg`]
+  , [`getcallerpc`]
+  , [`systemstack`]
+  , [`newproc1`]
+  , [`runqput`]
+  , [`wakep`]
 
 ```go
 func newproc(fn *funcval) {
@@ -284,7 +282,7 @@ func newproc(fn *funcval) {
 }
 ```
 
-首先[`getg`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/stubs.go#L21-L24)获取当前正在运行的`g`也就是获取[g0](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L115)(在 `amd64` 平台这行会被汇编重写为从 `R14` 或 `TLS` 寄存器获取)， `getcallerpc` 则获取调用者的调用者的 PC 其实也就是汇编中调用 `newpoc` 时的 PC(指向 `CALL	runtime·newproc(SB)` 的下一行指令)，其值将会被稍后创建的 `newg` 所持有。随后调用 `systemstack` 方法创建 `newg` 并将其放到了当前 `g0` 绑定的 `M` 对应的 `P` 的队列上，对于其中的 `newproc1` 主要任务就是将需要执行的函数入口 `fn` 绑定到创建的 `newg` （其父协程便是`g0`）上，对如何创建 `newg` 的过程感兴趣的读者可以自行阅读[`newproc1`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L4245-L4337)。
+首先 [`getg`] 获取当前正在运行的`g`也就是获取 [g0] (在 `amd64` 平台这行会被汇编重写为从 `R14` 或 `TLS` 寄存器获取)， `getcallerpc` 则获取调用者的调用者的 PC 其实也就是汇编中调用 `newpoc` 时的 PC(指向 `CALL	runtime·newproc(SB)` 的下一行指令)，其值将会被稍后创建的 `newg` 所持有。随后调用 `systemstack` 方法创建 `newg` 并将其放到了当前 `g0` 绑定的 `M` 对应的 `P` 的队列上，对于其中的 `newproc1` 主要任务就是将需要执行的函数入口 `fn` 绑定到创建的 `newg` （其父协程便是`g0`）上，对如何创建 `newg` 的过程感兴趣的读者可以自行阅读 [`newproc1`] 。
 
 在创建完 `newg` 后便会将其放置到当前 `g` 也就是 `g0` 所绑定的 `M` 对应的 `P` 的局部可运行 g 队列上(local runnable queue)。因为此时 `mainStarted` 为 `false` 所以 `wakep()` 还不会被调用。
 
@@ -307,7 +305,7 @@ flowchart LR
   click C "https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L1456-L1495"
 ```
 
-这个过程中最重要的就是最后的 `mstart1` 中最后一行代码 [`schedule()`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L3318-L3388)，其会调用[`findRunnable()`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L2657-L2998)依次尝试从当前 `p` 的局部队列，全局队列，`netpool`中获取可运行的`g`，如果没有的话就尝试从其他 `p` 那里偷取一半的 `g` 来运行。对于此时便是我们在刚才放入队列的 `newg` 会被调度获取并被函数 [`execute`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L2608-L2655) 所执行。
+这个过程中最重要的就是最后的 `mstart1` 中最后一行代码 [`schedule()`] ，其会调用 [`findRunnable()`] 依次尝试从当前 `p` 的局部队列，全局队列，`netpool`中获取可运行的`g`，如果没有的话就尝试从其他 `p` 那里偷取一半的 `g` 来运行。对于此时便是我们在刚才放入队列的 `newg` 会被调度获取并被函数 [`execute`] 所执行。
 
 ```go
 func execute(gp *g, inheritTime bool) {
@@ -316,9 +314,9 @@ func execute(gp *g, inheritTime bool) {
 }
 ```
 
-可以看到 `execute` 函数本质上是通过调用 `gogo` 函数来执行我们传入的 `gp` 也就是 `newg` ，而 `gogo` 函数在代码中并没有实现，而是使用汇编代码编写，其内容如下 [`runtime·gogo`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/asm_amd64.s#L401-L422)。
+可以看到 `execute` 函数本质上是通过调用 `gogo` 函数来执行我们传入的 `gp` 也就是 `newg` ，而 `gogo` 函数在代码中并没有实现，而是使用汇编代码编写，其内容如下 [`runtime·gogo`] 。
 
-不过看懂其做了什么的前提是我们首先得了解 [`gp.sched`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/runtime2.go#L322-L342) 是用来干什么的。
+不过看懂其做了什么的前提是我们首先得了解 [`gp.sched`] 是用来干什么的。
 
 ```go
 type gobuf struct {
@@ -332,7 +330,7 @@ type gobuf struct {
 }
 ```
 
-在前面的 [`newproc1`](https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L4245-L4337) 中有段如下[`代码`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L4280-L4285) 负责对创建的 `newg` 的 `sched` 字段内存进行置空和赋值。
+在前面的 [`newproc1`] 中有段如下[`代码`](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L4280-L4285) 负责对创建的 `newg` 的 `sched` 字段内存进行置空和赋值。
 
 ```go
 // ..... 省略 .....
@@ -383,8 +381,8 @@ TEXT gogo<>(SB), NOSPLIT, $0
     JMP	BX
 ```
 
-- [gobuf_g 被赋值的位置](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L4284)
-- [gobuf_pc 被赋值位置](https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/sys_arm64.go#L9-L18)
+- [gobuf_g 被赋值的位置]
+- [gobuf_pc 被赋值位置]
 
 到这里我们就成功开始启动并执行创建的 `newg` 协程了，其第一条指令在 `gogo<>` 最后一行 `JMP BX` 被执行。到此我们就看到第一个协程 `g0` 如何被创建的，以及随后创建的第二个用于执行 `runtime.main` 的协程如何被创建和执行的，最后剩下的便是我们编写的 `mian.main` 如何被 `runtime.main` 调用执行的。
 
@@ -408,16 +406,39 @@ func main() {
 
 ## 链接
 
-[1] [The segment](https://thestarman.pcministry.com/asm/debug/Segments.html)
+[^1]: [The segment](https://thestarman.pcministry.com/asm/debug/Segments.html)
+[^2]: [arch_prctl](https://man7.org/linux/man-pages/man2/arch_prctl.2.html)
+[^3]: [TLS code](https://elixir.bootlin.com/linux/v2.6.39/source/arch/um/sys-x86_64/syscalls.c#L35)
+[^4]: [TLS Comment](https://github.com/golang/go/blob/a6219737e3eb062282e6483a915c395affb30c69/src/cmd/internal/obj/x86/obj6.go#L72)
+[^5]: [ABI-Internal](https://github.com/golang/go/blob/master/src/cmd/compile/abi-internal.md)
+[^6]: [ELF Handling For Thread-Local Storage](https://akkadia.org/drepper/tls.pdf)
+[^7]: [VSystemCall](https://www.ukuug.org/events/linux2001/papers/html/AArcangeli-vsyscalls.html)
+[^8]: [ELF auxiliary vector](http://articles.manugarg.com/aboutelfauxiliaryvectors)
 
-[2] [arch_prctl](https://man7.org/linux/man-pages/man2/arch_prctl.2.html)
-
-[3] [TLS code](https://elixir.bootlin.com/linux/v2.6.39/source/arch/um/sys-x86_64/syscalls.c#L35)
-
-[4] [TLS Comment](https://github.com/golang/go/blob/a6219737e3eb062282e6483a915c395affb30c69/src/cmd/internal/obj/x86/obj6.go#L72)
-
-[5] [ABI-Internal](https://github.com/golang/go/blob/master/src/cmd/compile/abi-internal.md)
-
-[6] [ELF Handling For Thread-Local Storage](https://akkadia.org/drepper/tls.pdf)
-
-[7] [VSystemCall](https://www.ukuug.org/events/linux2001/papers/html/AArcangeli-vsyscalls.html)
+[rt0_go]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L159
+[`src/runtime/sys_linux_amd64.s`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/sys_linux_amd64.s#L634-L648
+[`check`&`args`&`osinit`&`schedinit`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L337-L346
+[`check`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/runtime1.go#L142-L29
+[`args`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/runtime1.go#L66-L70
+[osinit]: https://github.com/golang/go/blob/55eaae452cf69df768b2aaf6045db22d6c1a4029/src/runtime/os_linux.go#L329-L351
+[schedinit]: https://github.com/golang/go/blob/55eaae452cf69df768b2aaf6045db22d6c1a4029/src/runtime/proc.go#L665-L769
+[`ncpu`]: https://github.com/golang/go/tree/master/src/runtime/runtime2.go#L1135
+[`$runtime·mainPC`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/asm_amd64.s#L375-L379
+[`runtime.main`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L145-L279
+[`newproc`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L4230-L4243
+[`getg`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/stubs.go#L21-L24
+[`getcallerpc`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/stubs.go#L318-L343
+[`systemstack`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/stubs.go#L42-L61
+[`newproc1`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L4245-L4337
+[`runqput`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L5950-L5986
+[`wakep`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L2496-L2533
+[`getg`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/stubs.go#L21-L24
+[g0]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L115
+[`schedule()`]: https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L3318-L3388
+[`findRunnable()`]: https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L2657-L2998
+[`execute`]: https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L2608-L2655
+[`runtime·gogo`]: https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/asm_amd64.s#L401-L422
+[`gp.sched`]: https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/runtime2.go#L322-L342
+[`newproc1`]: https://github.com/golang/go/blob/c75b10be0b88c5b6767fd6fdf4e25a82a665fb76/src/runtime/proc.go#L4245-L4337
+[gobuf_g 被赋值的位置]: https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/proc.go#L4284
+[gobuf_pc 被赋值位置]: https://github.com/golang/go/blob/d9c29ec6a54f929f4b0736db6b7598a4c2305e5e/src/runtime/sys_arm64.go#L9-L18
