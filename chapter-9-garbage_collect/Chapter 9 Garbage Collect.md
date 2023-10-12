@@ -17,7 +17,7 @@ b := &u.Name
 
 ### Collector 回收器
 
-回收器就是我们需要关心的垃圾回收主要执行者，但需要注意的是垃圾回收是一个跨多阶段的任务，回收器只是负责其中程序运行后的工作，但实际上脱离了编译期各种信息标记和赋值器染色控制等步骤回收器是无法运行起来的。简单地说回收器以特殊的触发算法控制其执行时机（比如到一定heap大小阈值启动，增加申请空间并回收），并一直以 并发标记 -> 并发清除 -> 结束 的循环进行垃圾回收工作，在众多资料中对于垃圾回收器的执行阶段有着详细的描述，这篇文章更关心的是运行在其背后的原理细节而非泛泛而谈的 “阶段” 解读，这些内容的简单程度读者可以直接阅读那些讲述这些内容的文章或者直接打开[mgc.go](https://github.com/golang/go/tree/release-branch.go1.21/src/runtime/mgc.go#L7)自己阅读即可。
+回收器就是我们需要关心的垃圾回收主要执行者，但需要注意的是垃圾回收是一个跨多阶段的任务，回收器只是负责其中程序运行后的工作，但实际上脱离了编译期各种信息标记和赋值器染色控制等步骤回收器是无法运行起来的。简单地说回收器以特殊的触发算法控制其执行时机（比如到一定heap大小阈值启动，增加申请空间并回收，这部分展开说又可以写一大堆，感兴趣的可以自行阅读 [^7]），并一直以 并发标记 -> 并发清除 -> 结束 的循环进行垃圾回收工作，在众多资料中对于垃圾回收器的执行阶段有着详细的描述，这篇文章更关心的是运行在其背后的原理细节而非泛泛而谈的 “阶段” 解读，这些内容的简单程度读者可以直接阅读那些讲述这些内容的文章或者直接打开[mgc.go](https://github.com/golang/go/tree/release-branch.go1.21/src/runtime/mgc.go#L7)自己阅读即可。
 
 ## 三色抽象
 
@@ -153,19 +153,80 @@ writePointer(slot, ptr):
 
 如果不关心具体详细数学证明的话，对其理解达到看懂上述两段话的水平也就足够了。
 
-## 混合写屏障源码分析
-
-在 go 中实现屏障的代码在**mbarrier.go** [^6]，[其中](https://github.com/golang/go/tree/release-branch.go1.21/src/runtime/mbarrier.go#L23-L60)概述了混合写屏障的内容。
+## 垃圾回收整体过程分析
 
 垃圾回收实现的原理决定了其涉及到如何标记对象，如何更新标记，如何回收标记了的对象多个过程，而这些过程又和语言本身的 ABI、内存结构，调用公约等设计息息相关，因此源码分析将会涉及到内存分配（分配时的初始标记），内存扫描（更新标记），内存回收（垃圾回收），逃逸分析（排除不需要 gc 的对象）....等。如果涉及内容在其他小节建议先阅读对应章节再继续。
 
+简单地说垃圾回收可以直接分为两个大阶段
+
+- 编译器 为各种类型最好标记，对齐内存&指针长度，进行逃逸分析将特定对象分配到堆上。
+- 运行期 分为两个小阶段 标记&清除，标记中的重点便是利用编译期信息和屏障确保标记准确无误，清除就更简单了只是将标记好的内存全部置空然后记录既可。
+
 ### 编译期
+
+在编译期最重要的几个任务是 结构体对齐, `GCDATA` 插入,逃逸分析，结构体对齐确保`GCDATA`在可执行文件中插入足够的信息方便运行时垃圾回收器使用，后者则负责将需要移动到堆上的对象移动到堆上以避免出现堆对象持有指向栈对象指针的情况造成悬挂指针问题(当然逃逸分析还有其他作用不过我们只关心和垃圾回收相关的领域)。
+
+#### 结构体对齐
+
+在 go 中对齐分为结构体对齐和指针对齐
+
+对于结构体对齐规则很简单只有一条 即结构体长度最少为结构体中最长字段的整数倍。
+
+```go
+type A struct {
+    a  int        // 8
+    b  int8      // 1
+    c  int32    // 4
+}
+```
+
+如上结构体就会对齐 a 的的长度 8 \* 2 = 16
+
+```bash
+(dlv) p &a.a
+(*int)(0x1400009cf00)
+(dlv) p &a.b
+(*int8)(0x1400009cf08)
+(dlv) p &a.c
+(*int32)(0x1400009cf0c)
+```
+
+指针对齐也很简单，如上所示 c 字段会对齐自身长度，其地址为上一个字段起始地址 0x1400009cf08 + 4 而不是 0x1400009cf08 + 第二个字段大小 1
+所以 b 和 c 之间实际上填充了 3 个字节作为 padding。
+
+```go
+type A struct {
+    a  int        // 8
+    b  int8      // 1
+    c  int32    // 4
+    d *int32
+}
+
+func main() {
+    a := A{1, 2, 3, nil}
+    var b any = a
+    fmt.Println(b)
+}
+```
+
+```bash
+(dlv) p *((*runtime.eface)(uintptr(&b)))
+runtime.eface {
+        _type: *internal/abi.Type {Size_: 24, PtrBytes: 24, Hash: 4062542396, TFlag: TFlagUncommon|TFlagExtraStar|TFlagNamed (7), Align_: 8, FieldAlign_: 8, Kind_: 25, Equal: type:.eq.main.A, GCData: *4, Str: 3808, PtrToThis: 19936},
+        data: unsafe.Pointer(0x1400000c030),}
+```
+
+这里面最重要的就是 `GCData: *4` 转换为二进制便是 `0100` 左右往左第三个bit为1 说明 3 \* 8 = 24 字节偏移位置是一个指针，24 偏移位置刚好是 a.d 。
+
+也就是在编译期间编译器就已经准备好结构体的内存布局和内存类型信息了，方便扫描的时候快速找到栈上的指针位置，否则运行期再去遍历寻找无论从技术上还是实践上都要支付难以忍受的代价。
 
 #### 汇编插入 GCDATA
 
 #### 逃逸分析减少堆上对象分配
 
 ### 运行期
+
+在 go 中实现屏障的代码在**mbarrier.go** [^6]，[其中](https://github.com/golang/go/tree/release-branch.go1.21/src/runtime/mbarrier.go#L23-L60)概述了混合写屏障的内容。
 
 #### Mutator 赋值器
 
@@ -244,3 +305,4 @@ func (t gcTrigger) test() bool {
 [^4]: [Uniprocessor Garbage Collection Techniques](https://www.cs.cmu.edu/~fp/courses/15411-f14/misc/wilson94-gc.pdf)
 [^5]: [Concurrent stack re-scanning](https://github.com/golang/proposal/blob/master/design/17505-concurrent-rescan.md)
 [^6]: [mbarrier.go](https://github.com/golang/go/tree/release-branch.go1.21/src/runtime/mbarrier.go#L1)
+[^7]: [gc-pacer-redesign](https://github.com/golang/proposal/blob/master/design/44167-gc-pacer-redesign.md)
